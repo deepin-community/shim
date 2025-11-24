@@ -8,16 +8,18 @@
 /* This is so vim's Syntastic checker won't yell about all these. */
 extern void __coverity_string_size_sanitize__(int);
 extern void __coverity_negative_sink__(int);
-extern void __coverity_alloc_nosize__(void);
+extern void *__coverity_alloc_nosize__(void);
+extern void __coverity_writeall0__(void *);
 extern void *__coverity_alloc__(int);
 extern void __coverity_sleep__();
 extern void __coverity_tainted_data_sanitize__(void *);
+extern void __coverity_free__(void *);
 #endif
 
 void *
 OBJ_dup(void *o)
 {
-	__coverity_alloc_nosize__();
+	return __coverity_alloc_nosize__();
 }
 
 int
@@ -52,7 +54,7 @@ gcm_gmult_4bit(u64 Xi[2], u128 Htable[16])
 }
 
 void
-msleep(int n)
+usleep(int n)
 {
 	__coverity_sleep__();
 }
@@ -131,6 +133,23 @@ AllocatePages(EFI_ALLOCATE_TYPE Type,
 		return EFI_SUCCESS;
 	}
 	return EFI_OUT_OF_RESOURCES;
+}
+
+void *
+AllocateZeroPool(int sz)
+{
+	void *ptr;
+
+	__coverity_negative_sink__(sz);
+	ptr = __coverity_alloc__(sz);
+	__coverity_writeall0__(ptr);
+	return ptr;
+}
+
+void
+FreePool(void *ptr)
+{
+	__coverity_free__(ptr);
 }
 
 // vim:fenc=utf-8:tw=75

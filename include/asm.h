@@ -26,25 +26,25 @@ static inline uint64_t read_counter(void)
 }
 
 #if defined(__x86_64__) || defined(__i386__) || defined(__i686__)
-static inline void pause(void)
+static inline void wait_for_debug(void)
 {
 	__asm__ __volatile__("pause");
 }
 #elif defined(__aarch64__)
-static inline void pause(void)
+static inline void wait_for_debug(void)
 {
 		__asm__ __volatile__("wfi");
 }
 #else
-static inline void pause(void)
+static inline void wait_for_debug(void)
 {
         uint64_t a, b;
         int x;
-        extern void msleep(unsigned long msecs);
+        extern void usleep(unsigned long usecs);
 
         a = read_counter();
         for (x = 0; x < 1000; x++) {
-                msleep(1000);
+                usleep(1000);
                 b = read_counter();
                 if (a != b)
                         break;

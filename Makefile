@@ -1,7 +1,7 @@
 default : all
 
 NAME		= shim
-VERSION		= 15.4
+VERSION		= 15.8
 ifneq ($(origin RELEASE),undefined)
 DASHRELEASE	?= -$(RELEASE)
 else
@@ -38,12 +38,12 @@ CFLAGS += -DENABLE_SHIM_CERT
 else
 TARGETS += $(MMNAME) $(FBNAME)
 endif
-OBJS	= shim.o mok.o netboot.o cert.o replacements.o tpm.o version.o errlog.o sbat.o sbat_data.o pe.o httpboot.o csv.o
+OBJS	= shim.o globals.o mok.o netboot.o cert.o replacements.o tpm.o version.o errlog.o sbat.o sbat_data.o sbat_var.o pe.o pe-relocate.o httpboot.o csv.o load-options.o
 KEYS	= shim_cert.h ocsp.* ca.* shim.crt shim.csr shim.p12 shim.pem shim.key shim.cer
-ORIG_SOURCES	= shim.c mok.c netboot.c replacements.c tpm.c errlog.c sbat.c pe.c httpboot.c shim.h version.h $(wildcard include/*.h)
-MOK_OBJS = MokManager.o PasswordCrypt.o crypt_blowfish.o errlog.o sbat_data.o
+ORIG_SOURCES	= shim.c globals.c mok.c netboot.c replacements.c tpm.c errlog.c sbat.c pe.c pe-relocate.c httpboot.c shim.h version.h $(wildcard include/*.h) cert.S sbat_var.S
+MOK_OBJS = MokManager.o PasswordCrypt.o crypt_blowfish.o errlog.o sbat_data.o globals.o
 ORIG_MOK_SOURCES = MokManager.c PasswordCrypt.c crypt_blowfish.c shim.h $(wildcard include/*.h)
-FALLBACK_OBJS = fallback.o tpm.o errlog.o sbat_data.o
+FALLBACK_OBJS = fallback.o tpm.o errlog.o sbat_data.o globals.o
 ORIG_FALLBACK_SRCS = fallback.c
 SBATPATH = $(TOPDIR)/data/sbat.csv
 
@@ -61,6 +61,10 @@ ifneq ($(origin FALLBACK_VERBOSE), undefined)
 	CFLAGS += -DFALLBACK_VERBOSE
 endif
 
+ifneq ($(origin FALLBACK_NONINTERACTIVE), undefined)
+	CFLAGS += -DFALLBACK_NONINTERACTIVE
+endif
+
 ifneq ($(origin FALLBACK_VERBOSE_WAIT), undefined)
 	CFLAGS += -DFALLBACK_VERBOSE_WAIT=$(FALLBACK_VERBOSE_WAIT)
 endif
@@ -71,6 +75,13 @@ confcheck:
 ifneq ($(origin EFI_PATH),undefined)
 	$(error EFI_PATH is no longer supported, you must build using the supplied copy of gnu-efi)
 endif
+
+compile_commands.json : Makefile Make.rules Make.defaults 
+	make clean
+	bear -- make COMPILER=clang test all
+	sed -i \
+		-e 's/"-maccumulate-outgoing-args",//g' \
+		$@
 
 update :
 	git submodule update --init --recursive
@@ -104,9 +115,6 @@ shim.o: shim_cert.h
 endif
 shim.o: $(wildcard $(TOPDIR)/*.h)
 
-cert.o : $(TOPDIR)/cert.S
-	$(CC) $(CFLAGS) -c -o $@ $<
-
 sbat.%.csv : data/sbat.%.csv
 	$(DOS2UNIX) $(D2UFLAGS) $< $@
 	tail -c1 $@ | read -r _ || echo >> $@ # ensure a trailing newline
@@ -121,9 +129,10 @@ sbat_data.o : /dev/null
 		$@
 	$(foreach vs,$(VENDOR_SBATS),$(call add-vendor-sbat,$(vs),$@))
 
-$(SHIMNAME) : $(SHIMSONAME)
-$(MMNAME) : $(MMSONAME)
-$(FBNAME) : $(FBSONAME)
+$(SHIMNAME) : $(SHIMSONAME) post-process-pe
+$(MMNAME) : $(MMSONAME) post-process-pe
+$(FBNAME) : $(FBSONAME) post-process-pe
+$(SHIMNAME) $(MMNAME) $(FBNAME) : | post-process-pe
 
 LIBS = Cryptlib/libcryptlib.a \
        Cryptlib/OpenSSL/libopenssl.a \
@@ -148,21 +157,28 @@ gnu-efi/$(ARCH_GNUEFI)/gnuefi/libgnuefi.a gnu-efi/$(ARCH_GNUEFI)/lib/libefi.a: C
 gnu-efi/$(ARCH_GNUEFI)/gnuefi/libgnuefi.a gnu-efi/$(ARCH_GNUEFI)/lib/libefi.a:
 	mkdir -p gnu-efi/lib gnu-efi/gnuefi
 	$(MAKE) -C gnu-efi \
-		ARCH=$(ARCH_GNUEFI) TOPDIR=$(TOPDIR)/gnu-efi \
+		COMPILER="$(COMPILER)" \
+		CCC_CC="$(COMPILER)" \
+		CC="$(CC)" \
+		ARCH=$(ARCH_GNUEFI) \
+		TOPDIR=$(TOPDIR)/gnu-efi \
 		-f $(TOPDIR)/gnu-efi/Makefile \
-		lib gnuefi inc
+		lib gnuefi inc $(IGNORE_COMPILER_ERRORS)
 
 Cryptlib/libcryptlib.a:
 	for i in Hash Hmac Cipher Rand Pk Pem SysCall; do mkdir -p Cryptlib/$$i; done
-	$(MAKE) TOPDIR=$(TOPDIR) VPATH=$(TOPDIR)/Cryptlib -C Cryptlib -f $(TOPDIR)/Cryptlib/Makefile
+	$(MAKE) TOPDIR=$(TOPDIR) VPATH=$(TOPDIR)/Cryptlib -C Cryptlib -f $(TOPDIR)/Cryptlib/Makefile $(IGNORE_COMPILER_ERRORS)
 
 Cryptlib/OpenSSL/libopenssl.a:
 	for i in x509v3 x509 txt_db stack sha rsa rc4 rand pkcs7 pkcs12 pem ocsp objects modes md5 lhash kdf hmac evp err dso dh conf comp cmac buffer bn bio async/arch asn1 aes; do mkdir -p Cryptlib/OpenSSL/crypto/$$i; done
-	$(MAKE) TOPDIR=$(TOPDIR) VPATH=$(TOPDIR)/Cryptlib/OpenSSL -C Cryptlib/OpenSSL -f $(TOPDIR)/Cryptlib/OpenSSL/Makefile
+	$(MAKE) TOPDIR=$(TOPDIR) VPATH=$(TOPDIR)/Cryptlib/OpenSSL -C Cryptlib/OpenSSL -f $(TOPDIR)/Cryptlib/OpenSSL/Makefile $(IGNORE_COMPILER_ERRORS)
 
 lib/lib.a: | $(TOPDIR)/lib/Makefile $(wildcard $(TOPDIR)/include/*.[ch])
 	mkdir -p lib
-	$(MAKE) VPATH=$(TOPDIR)/lib TOPDIR=$(TOPDIR) -C lib -f $(TOPDIR)/lib/Makefile
+	$(MAKE) VPATH=$(TOPDIR)/lib TOPDIR=$(TOPDIR) -C lib -f $(TOPDIR)/lib/Makefile $(IGNORE_COMPILER_ERRORS)
+
+post-process-pe : $(TOPDIR)/post-process-pe.c
+	$(HOSTCC) -std=gnu11 -Og -g3 -Wall -Wextra -Wno-missing-field-initializers -Werror -o $@ $<
 
 buildid : $(TOPDIR)/buildid.c
 	$(HOSTCC) -I/usr/include -Og -g3 -Wall -Werror -Wextra -o $@ $< -lelf
@@ -243,11 +259,10 @@ ifneq ($(OBJCOPY_GTE224),1)
 endif
 	$(OBJCOPY) -D -j .text -j .sdata -j .data -j .data.ident \
 		-j .dynamic -j .rodata -j .rel* \
-		-j .rela* -j .reloc -j .eh_frame \
-		-j .vendor_cert -j .sbat \
+		-j .rela* -j .dyn -j .reloc -j .eh_frame \
+		-j .vendor_cert -j .sbat -j .sbatlevel \
 		$(FORMAT) $< $@
-	# I am tired of wasting my time fighting binutils timestamp code.
-	dd conv=notrunc bs=1 count=4 seek=$(TIMESTAMP_LOCATION) if=/dev/zero of=$@
+	./post-process-pe -vv $(POST_PROCESS_PE_FLAGS) $@
 
 ifneq ($(origin ENABLE_SHIM_HASH),undefined)
 %.hash : %.efi
@@ -260,7 +275,8 @@ ifneq ($(OBJCOPY_GTE224),1)
 endif
 	$(OBJCOPY) -D -j .text -j .sdata -j .data \
 		-j .dynamic -j .rodata -j .rel* \
-		-j .rela* -j .reloc -j .eh_frame -j .sbat \
+		-j .rela* -j .dyn -j .reloc -j .eh_frame -j .sbat \
+		-j .sbatlevel \
 		-j .debug_info -j .debug_abbrev -j .debug_aranges \
 		-j .debug_line -j .debug_str -j .debug_ranges \
 		-j .note.gnu.build-id \
@@ -277,21 +293,47 @@ else
 	$(PESIGN) -n certdb -i $< -c "shim" -s -o $@ -f
 endif
 
-test :
-	@make -f $(TOPDIR)/include/test.mk EFI_INCLUDES="$(EFI_INCLUDES)" ARCH_DEFINES="$(ARCH_DEFINES)" all
+fuzz fuzz-clean fuzz-coverage fuzz-lto :
+	@make -f $(TOPDIR)/include/fuzz.mk \
+		COMPILER="$(COMPILER)" \
+		CROSS_COMPILE="$(CROSS_COMPILE)" \
+		CLANG_WARNINGS="$(CLANG_WARNINGS)" \
+		ARCH_DEFINES="$(ARCH_DEFINES)" \
+		EFI_INCLUDES="$(EFI_INCLUDES)" \
+		fuzz-clean $@
+
+test test-clean test-coverage test-lto :
+	@make -f $(TOPDIR)/include/test.mk \
+		COMPILER="$(COMPILER)" \
+		CROSS_COMPILE="$(CROSS_COMPILE)" \
+		CLANG_WARNINGS="$(CLANG_WARNINGS)" \
+		ARCH_DEFINES="$(ARCH_DEFINES)" \
+		EFI_INCLUDES="$(EFI_INCLUDES)" \
+		test-clean $@
+
+$(patsubst %.c,%,$(wildcard fuzz-*.c)) :
+	@make -f $(TOPDIR)/include/fuzz.mk EFI_INCLUDES="$(EFI_INCLUDES)" ARCH_DEFINES="$(ARCH_DEFINES)" $@
 
 $(patsubst %.c,%,$(wildcard test-*.c)) :
 	@make -f $(TOPDIR)/include/test.mk EFI_INCLUDES="$(EFI_INCLUDES)" ARCH_DEFINES="$(ARCH_DEFINES)" $@
 
-.PHONY : $(patsubst %.c,%,$(wildcard test-*.c)) test
+clean-fuzz-objs:
+	@make -f $(TOPDIR)/include/fuzz.mk EFI_INCLUDES="$(EFI_INCLUDES)" ARCH_DEFINES="$(ARCH_DEFINES)" clean
 
 clean-test-objs:
 	@make -f $(TOPDIR)/include/test.mk EFI_INCLUDES="$(EFI_INCLUDES)" ARCH_DEFINES="$(ARCH_DEFINES)" clean
 
+.PHONY : $(patsubst %.c,%,$(wildcard fuzz-*.c)) fuzz
+.PHONY : $(patsubst %.c,%,$(wildcard test-*.c)) test
+
 clean-gnu-efi:
 	@if [ -d gnu-efi ] ; then \
 		$(MAKE) -C gnu-efi \
-			ARCH=$(ARCH_GNUEFI) TOPDIR=$(TOPDIR)/gnu-efi \
+			CC="$(CC)" \
+			HOSTCC="$(HOSTCC)" \
+			COMPILER="$(COMPILER)" \
+			ARCH=$(ARCH_GNUEFI) \
+			TOPDIR=$(TOPDIR)/gnu-efi \
 			-f $(TOPDIR)/gnu-efi/Makefile \
 			clean ; \
 	fi
@@ -303,7 +345,7 @@ clean-lib-objs:
 
 clean-shim-objs:
 	@rm -rvf $(TARGET) *.o $(SHIM_OBJS) $(MOK_OBJS) $(FALLBACK_OBJS) $(KEYS) certdb $(BOOTCSVNAME)
-	@rm -vf *.debug *.so *.efi *.efi.* *.tar.* version.c buildid
+	@rm -vf *.debug *.so *.efi *.efi.* *.tar.* version.c buildid post-process-pe compile_commands.json
 	@rm -vf Cryptlib/*.[oa] Cryptlib/*/*.[oa]
 	@if [ -d .git ] ; then git clean -f -d -e 'Cryptlib/OpenSSL/*'; fi
 
@@ -317,7 +359,7 @@ clean-cryptlib-objs:
 		$(MAKE) -C Cryptlib -f $(TOPDIR)/Cryptlib/Makefile clean ; \
 	fi
 
-clean: clean-shim-objs clean-test-objs clean-gnu-efi clean-openssl-objs clean-cryptlib-objs clean-lib-objs
+clean: clean-shim-objs clean-fuzz-objs clean-test-objs clean-gnu-efi clean-openssl-objs clean-cryptlib-objs clean-lib-objs
 
 GITTAG = $(VERSION)
 
