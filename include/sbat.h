@@ -6,11 +6,6 @@
 #ifndef SBAT_H_
 #define SBAT_H_
 
-#define SBAT_VAR_SIG "sbat,"
-#define SBAT_VAR_VERSION "1,"
-#define SBAT_VAR_DATE "2021030218"
-#define SBAT_VAR SBAT_VAR_SIG SBAT_VAR_VERSION SBAT_VAR_DATE "\n"
-
 #define UEFI_VAR_NV_BS \
 	(EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS)
 #define UEFI_VAR_NV_BS_RT                                              \
@@ -33,6 +28,18 @@
 #define SBAT_VAR_ATTRS UEFI_VAR_NV_BS
 #endif
 
+#define SBAT_POLICY L"SbatPolicy"
+#define SBAT_POLICY8 "SbatPolicy"
+#define SSP_POLICY L"SSPPolicy"
+#define SSP_POLICY8 "SSPPolicy"
+
+#define POLICY_LATEST		1
+#define POLICY_AUTOMATIC	2
+#define POLICY_RESET		3
+#define POLICY_NOTREAD		255
+
+#define REVOCATIONFILE L"revocations.efi"
+
 extern UINTN _sbat, _esbat;
 
 struct sbat_var_entry {
@@ -48,10 +55,12 @@ extern list_t sbat_var;
 #define SBAT_VAR_COLUMNS ((sizeof (struct sbat_var_entry) - sizeof(list_t)) / sizeof(CHAR8 *))
 #define SBAT_VAR_REQUIRED_COLUMNS (SBAT_VAR_COLUMNS - 1)
 
-EFI_STATUS parse_sbat_var(list_t *entries);
+EFI_STATUS parse_sbat_var(list_t *entries, char *sbat_var_candidate);
 void cleanup_sbat_var(list_t *entries);
-EFI_STATUS set_sbat_uefi_variable(void);
-bool preserve_sbat_uefi_variable(UINT8 *sbat, UINTN sbatsize, UINT32 attributes);
+EFI_STATUS set_sbat_uefi_variable_internal(void);
+EFI_STATUS set_sbat_uefi_variable(char *, char *);
+bool preserve_sbat_uefi_variable(UINT8 *sbat, UINTN sbatsize,
+				 UINT32 attributes, char *sbar_var);
 
 struct sbat_section_entry {
 	const CHAR8 *component_name;

@@ -14,8 +14,26 @@ EFI_STATUS
 read_header(void *data, unsigned int datasize,
 	    PE_COFF_LOADER_IMAGE_CONTEXT *context);
 
+EFI_STATUS verify_image(void *data, unsigned int datasize,
+			EFI_LOADED_IMAGE *li,
+			PE_COFF_LOADER_IMAGE_CONTEXT *context);
+
 EFI_STATUS
-handle_sbat(char *SBATBase, size_t SBATSize);
+verify_sbat_section(char *SBATBase, size_t SBATSize);
+
+EFI_STATUS
+get_section_vma (UINTN section_num,
+		 char *buffer, size_t bufsz UNUSED,
+		 PE_COFF_LOADER_IMAGE_CONTEXT *context,
+		 char **basep, size_t *sizep,
+		 EFI_IMAGE_SECTION_HEADER **sectionp);
+
+EFI_STATUS
+get_section_vma_by_name (char *name, size_t namesz,
+			 char *buffer, size_t bufsz,
+			 PE_COFF_LOADER_IMAGE_CONTEXT *context,
+			 char **basep, size_t *sizep,
+			 EFI_IMAGE_SECTION_HEADER **sectionp);
 
 EFI_STATUS
 handle_image (void *data, unsigned int datasize,
@@ -25,7 +43,7 @@ handle_image (void *data, unsigned int datasize,
 	      UINTN *alloc_pages);
 
 EFI_STATUS
-generate_hash (char *data, unsigned int datasize_in,
+generate_hash (char *data, unsigned int datasize,
 	       PE_COFF_LOADER_IMAGE_CONTEXT *context,
 	       UINT8 *sha256hash, UINT8 *sha1hash);
 

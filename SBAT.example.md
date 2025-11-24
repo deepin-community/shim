@@ -5,18 +5,18 @@ SBAT: Current proposal
 -------------
 
 the `.sbat` section has the following fields:
-| field | meaning |
-|---|---|
-| component_name | the name we're comparing
-| component_generation | the generation number for the comparison
-| vendor_name | human readable vendor name
-| vendor_package_name | human readable package name
-| vendor_version | human readable package version (maybe machine parseable too, not specified here)
-| vendor_url | url to look stuff up, contact, whatever.
+| field                | meaning                                                                          |
+|----------------------|----------------------------------------------------------------------------------|
+| component_name       | the name we're comparing                                                         |
+| component_generation | the generation number for the comparison                                         |
+| vendor_name          | human readable vendor name                                                       |
+| vendor_package_name  | human readable package name                                                      |
+| vendor_version       | human readable package version (maybe machine parseable too, not specified here) |
+| vendor_url           | url to look stuff up, contact, whatever.                                         |
 
 `SBAT` EFI variable
 -----------------
-The SBAT EFI variable (`SBAT-605dab50-e046-4300-abb6-3dd810dd8b23`) is structured as a series ASCII CSV records:
+The SBAT EFI variable (`SbatLevel-605dab50-e046-4300-abb6-3dd810dd8b23`) is structured as a series ASCII CSV records:
 
 ```
 sbat,1
@@ -192,7 +192,7 @@ Debian discovers that they actually shipped bug 0 as well (woops).  They
 produce a new build which fixes it and has the following in `.sbat`:
 ```
 sbat,1,SBAT Version,sbat,1,https://github.com/rhboot/shim/blob/main/SBAT.md
-grub,1,Free Software Foundation,grub,2.04,https://www.gnu.org/software/grub/
+grub,2,Free Software Foundation,grub,2.04,https://www.gnu.org/software/grub/
 grub.debian,2,Debian,grub2,2.04-13,https://packages.debian.org/source/sid/grub2
 ```
 
