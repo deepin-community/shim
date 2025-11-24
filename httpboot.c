@@ -179,8 +179,8 @@ generate_next_uri (CONST CHAR8 *current_uri, CONST CHAR8 *next_loader,
 	if (!*uri)
 		return EFI_OUT_OF_RESOURCES;
 
-	CopyMem(*uri, current_uri, path_len);
-	CopyMem(*uri + path_len, next_loader, next_len);
+	CopyMem(*uri, (void *)current_uri, path_len);
+	CopyMem(*uri + path_len, (void *)next_loader, next_len);
 	(*uri)[path_len + next_len] = '\0';
 
 	return EFI_SUCCESS;
@@ -209,7 +209,7 @@ extract_hostname (CONST CHAR8 *url, CHAR8 **hostname)
 	if (!*hostname)
 		return EFI_OUT_OF_RESOURCES;
 
-	CopyMem(*hostname, start, host_len);
+	CopyMem(*hostname, (void *)start, host_len);
 	(*hostname)[host_len] = '\0';
 
 	return EFI_SUCCESS;
@@ -232,9 +232,9 @@ get_nic_handle (EFI_MAC_ADDRESS *mac)
 
 	/* Get the list of handles that support the HTTP service binding
 	   protocol */
-	efi_status = gBS->LocateHandleBuffer(ByProtocol,
-					     &EFI_HTTP_BINDING_GUID,
-					     NULL, &NoHandles, &buffer);
+	efi_status = BS->LocateHandleBuffer(ByProtocol,
+					    &EFI_HTTP_BINDING_GUID,
+					    NULL, &NoHandles, &buffer);
 	if (EFI_ERROR(efi_status))
 		return NULL;
 
@@ -306,8 +306,8 @@ set_ip6(EFI_HANDLE *nic, IPv6_DEVICE_PATH *ip6node)
 	EFI_IPv6_ADDRESS gateway;
 	EFI_STATUS efi_status;
 
-	efi_status = gBS->HandleProtocol(nic, &EFI_IP6_CONFIG_GUID,
-					 (VOID **)&ip6cfg);
+	efi_status = BS->HandleProtocol(nic, &EFI_IP6_CONFIG_GUID,
+					(VOID **)&ip6cfg);
 	if (EFI_ERROR(efi_status))
 		return efi_status;
 
@@ -367,8 +367,8 @@ set_ip4(EFI_HANDLE *nic, IPv4_DEVICE_PATH *ip4node)
 	EFI_IPv4_ADDRESS gateway;
 	EFI_STATUS efi_status;
 
-	efi_status = gBS->HandleProtocol(nic, &EFI_IP4_CONFIG2_GUID,
-					 (VOID **)&ip4cfg2);
+	efi_status = BS->HandleProtocol(nic, &EFI_IP4_CONFIG2_GUID,
+					(VOID **)&ip4cfg2);
 	if (EFI_ERROR(efi_status))
 		return efi_status;
 
@@ -470,9 +470,9 @@ send_http_request (EFI_HTTP_PROTOCOL *http, CHAR8 *hostname, CHAR8 *uri)
 	tx_token.Message = &tx_message;
 	tx_token.Event = NULL;
 	request_done = FALSE;
-	efi_status = gBS->CreateEvent(EVT_NOTIFY_SIGNAL, TPL_NOTIFY,
-				      httpnotify, &request_done,
-				      &tx_token.Event);
+	efi_status = BS->CreateEvent(EVT_NOTIFY_SIGNAL, TPL_NOTIFY,
+				     httpnotify, &request_done,
+				     &tx_token.Event);
 	if (EFI_ERROR(efi_status)) {
 		perror(L"Failed to Create Event for HTTP request: %r\n",
 		       efi_status);
@@ -496,7 +496,7 @@ send_http_request (EFI_HTTP_PROTOCOL *http, CHAR8 *hostname, CHAR8 *uri)
 	}
 
 error:
-	event_status = gBS->CloseEvent(tx_token.Event);
+	event_status = BS->CloseEvent(tx_token.Event);
 	if (EFI_ERROR(event_status)) {
 		perror(L"Failed to close Event for HTTP request: %r\n",
 		       event_status);
@@ -534,9 +534,9 @@ receive_http_response(EFI_HTTP_PROTOCOL *http, VOID **buffer, UINT64 *buf_size)
 	rx_token.Message = &rx_message;
 	rx_token.Event = NULL;
 	response_done = FALSE;
-	efi_status = gBS->CreateEvent(EVT_NOTIFY_SIGNAL, TPL_NOTIFY,
-				      httpnotify, &response_done,
-				      &rx_token.Event);
+	efi_status = BS->CreateEvent(EVT_NOTIFY_SIGNAL, TPL_NOTIFY,
+				     httpnotify, &response_done,
+				     &rx_token.Event);
 	if (EFI_ERROR(efi_status)) {
 		perror(L"Failed to Create Event for HTTP response: %r\n",
 		       efi_status);
@@ -571,13 +571,20 @@ receive_http_response(EFI_HTTP_PROTOCOL *http, VOID **buffer, UINT64 *buf_size)
 
 	/* Check the length of the file */
 	for (i = 0; i < rx_message.HeaderCount; i++) {
-		if (!strcmp(rx_message.Headers[i].FieldName, (CHAR8 *)"Content-Length")) {
+		if (!strcasecmp(rx_message.Headers[i].FieldName,
+				(CHAR8 *)"Content-Length")) {
 			*buf_size = ascii_to_int(rx_message.Headers[i].FieldValue);
 		}
 	}
 
 	if (*buf_size == 0) {
-		perror(L"Failed to get Content-Lenght\n");
+		perror(L"Failed to get Content-Length\n");
+		goto error;
+	}
+
+	if (*buf_size < rx_message.BodyLength) {
+		efi_status = EFI_BAD_BUFFER_SIZE;
+		perror(L"Invalid Content-Length\n");
 		goto error;
 	}
 
@@ -631,7 +638,7 @@ receive_http_response(EFI_HTTP_PROTOCOL *http, VOID **buffer, UINT64 *buf_size)
 	}
 
 error:
-	event_status = gBS->CloseEvent(rx_token.Event);
+	event_status = BS->CloseEvent(rx_token.Event);
 	if (EFI_ERROR(event_status)) {
 		perror(L"Failed to close Event for HTTP response: %r\n",
 		       event_status);
@@ -659,9 +666,9 @@ http_fetch (EFI_HANDLE image, EFI_HANDLE device,
 	*buf_size = 0;
 
 	/* Open HTTP Service Binding Protocol */
-	efi_status = gBS->OpenProtocol(device, &EFI_HTTP_BINDING_GUID,
-				       (VOID **) &service, image, NULL,
-				       EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+	efi_status = BS->OpenProtocol(device, &EFI_HTTP_BINDING_GUID,
+				      (VOID **) &service, image, NULL,
+				      EFI_OPEN_PROTOCOL_GET_PROTOCOL);
 	if (EFI_ERROR(efi_status))
 		return efi_status;
 
@@ -675,8 +682,8 @@ http_fetch (EFI_HANDLE image, EFI_HANDLE device,
 	}
 
 	/* Get the http protocol */
-	efi_status = gBS->HandleProtocol(http_handle, &EFI_HTTP_PROTOCOL_GUID,
-					 (VOID **) &http);
+	efi_status = BS->HandleProtocol(http_handle, &EFI_HTTP_PROTOCOL_GUID,
+					(VOID **) &http);
 	if (EFI_ERROR(efi_status)) {
 		perror(L"Failed to get http\n");
 		goto error;
@@ -712,18 +719,20 @@ error:
 }
 
 EFI_STATUS
-httpboot_fetch_buffer (EFI_HANDLE image, VOID **buffer, UINT64 *buf_size)
+httpboot_fetch_buffer (EFI_HANDLE image, VOID **buffer, UINT64 *buf_size,
+		CHAR8 *name)
 {
 	EFI_STATUS efi_status;
 	EFI_HANDLE nic;
-	CHAR8 next_loader[sizeof DEFAULT_LOADER_CHAR];
+	CHAR8 *next_loader;
 	CHAR8 *next_uri = NULL;
 	CHAR8 *hostname = NULL;
 
 	if (!uri)
 		return EFI_NOT_READY;
 
-	translate_slashes(next_loader, DEFAULT_LOADER_CHAR);
+	next_loader = (CHAR8 *)AllocatePool((strlen(name) + 1) * sizeof (CHAR8));
+	translate_slashes(next_loader, name);
 
 	/* Create the URI for the next loader based on the original URI */
 	efi_status = generate_next_uri(uri, next_loader, &next_uri);

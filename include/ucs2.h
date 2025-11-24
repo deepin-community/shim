@@ -63,49 +63,4 @@ StrCSpn(const CHAR16 *s, const CHAR16 *reject)
 	return ret;
 }
 
-/*
- * Test if an entire buffer is nothing but NUL characters.  This
- * implementation "gracefully" ignores the difference between the
- * UTF-8/ASCII 1-byte NUL and the UCS-2 2-byte NUL.
- */
-static inline bool
-__attribute__((__unused__))
-is_all_nuls(UINT8 *data, UINTN data_size)
-{
-	UINTN i;
-
-	for (i = 0; i < data_size; i++) {
-		if (data[i] != 0)
-			return false;
-	}
-	return true;
-}
-
-static inline UINTN
-__attribute__((__unused__))
-count_ucs2_strings(UINT8 *data, UINTN data_size)
-{
-	UINTN pos = 0;
-	UINTN last_nul_pos = 0;
-	UINTN num_nuls = 0;
-	UINTN i;
-
-	if (data_size % 2 != 0)
-		return 0;
-
-	for (i = pos; i < data_size; i++) {
-		if (i % 2 != 0) {
-			if (data[i] != 0)
-				return 0;
-		} else if (data[i] == 0) {
-			last_nul_pos = i;
-			num_nuls++;
-		}
-		pos = i;
-	}
-	if (num_nuls > 0 && last_nul_pos != pos - 1)
-		return 0;
-	return num_nuls;
-}
-
 #endif /* SHIM_UCS2_H */

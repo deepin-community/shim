@@ -15,6 +15,7 @@ SECTIONS
    *(.gnu.linkonce.t.*)
    _etext = .;
   }
+  . = ALIGN(4096);
   .reloc :
   {
    *(.reloc)
@@ -26,6 +27,10 @@ SECTIONS
   . = ALIGN(4096);
   .data.ident : {
     *(.data.ident)
+  }
+  . = ALIGN(4096);
+  .sbatlevel : {
+    *(.sbatlevel)
   }
 
   . = ALIGN(4096);

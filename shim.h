@@ -27,6 +27,10 @@
 #error On x86_64 you must have a compiler new enough to support __attribute__((__ms_abi__))
 #endif
 
+#if CLANG_PREREQ(3, 4)
+#pragma GCC diagnostic ignored "-Wpointer-bool-conversion"
+#endif
+
 #if !defined(GNU_EFI_USE_EXTERNAL_STDARG)
 #define GNU_EFI_USE_EXTERNAL_STDARG
 #endif
@@ -167,18 +171,23 @@
 #include "include/httpboot.h"
 #include "include/ip4config2.h"
 #include "include/ip6config.h"
+#include "include/load-options.h"
+#include "include/mok.h"
 #include "include/netboot.h"
 #include "include/passwordcrypt.h"
 #include "include/peimage.h"
 #include "include/pe.h"
 #include "include/replacements.h"
 #include "include/sbat.h"
+#include "include/sbat_var_defs.h"
+#include "include/ssp.h"
 #if defined(OVERRIDE_SECURITY_POLICY)
 #include "include/security_policy.h"
 #endif
 #include "include/simple_file.h"
 #include "include/str.h"
 #include "include/tpm.h"
+#include "include/cc.h"
 #include "include/ucs2.h"
 #include "include/variables.h"
 #include "include/hexdump.h"
@@ -188,6 +197,10 @@
 #ifndef SHIM_UNIT_TEST
 #include "Cryptlib/Include/OpenSslSupport.h"
 #endif
+
+#define MEM_ATTR_R	4
+#define MEM_ATTR_W	2
+#define MEM_ATTR_X	1
 
 INTERFACE_DECL(_SHIM_LOCK);
 
@@ -242,6 +255,9 @@ extern UINT8 *vendor_authorized;
 extern UINT32 vendor_deauthorized_size;
 extern UINT8 *vendor_deauthorized;
 
+extern UINT32 user_cert_size;
+extern UINT8 *user_cert;
+
 #if defined(ENABLE_SHIM_CERT)
 extern UINT32 build_cert_size;
 extern UINT8 *build_cert;
@@ -249,6 +265,9 @@ extern UINT8 *build_cert;
 
 extern UINT8 user_insecure_mode;
 extern UINT8 ignore_db;
+extern UINT8 trust_mok_list;
+extern UINT8 mok_policy;
+
 extern UINT8 in_protocol;
 extern void *load_options;
 extern UINT32 load_options_size;
@@ -263,19 +282,45 @@ verify_buffer (char *data, int datasize,
 #ifndef SHIM_UNIT_TEST
 #define perror_(file, line, func, fmt, ...) ({					\
 		UINTN __perror_ret = 0;						\
+		_Static_assert((fmt) != NULL,					\
+			       "format specifier cannot be NULL");		\
 		if (!in_protocol)						\
 			__perror_ret = console_print((fmt), ##__VA_ARGS__);	\
 		LogError_(file, line, func, fmt, ##__VA_ARGS__);		\
 		__perror_ret;							\
 	})
-#define perror(fmt, ...) \
-	perror_(__FILE__, __LINE__ - 1, __func__, fmt, ##__VA_ARGS__)
-#define LogError(fmt, ...) \
-	LogError_(__FILE__, __LINE__ - 1, __func__, fmt, ##__VA_ARGS__)
+#define perror(fmt, ...) ({							\
+		_Static_assert((fmt) != NULL,					\
+			       "format specifier cannot be NULL");		\
+		perror_(__FILE__, __LINE__ - 1, __func__, fmt, ##__VA_ARGS__);	\
+	})
+#define LogError(fmt, ...) ({							\
+		_Static_assert((fmt) != NULL,					\
+			       "format specifier cannot be NULL");		\
+		LogError_(__FILE__, __LINE__ - 1, __func__, fmt, ##__VA_ARGS__);\
+	})
 #else
-#define perror(fmt, ...)
-#define LogError(fmt, ...)
+#define perror(fmt, ...) ({							\
+		_Static_assert((fmt) != NULL,					\
+			       "format specifier cannot be NULL");		\
+	})
+#define LogError(fmt, ...) ({							\
+		_Static_assert((fmt) != NULL,					\
+			       "format specifier cannot be NULL");		\
+	})
 #endif
+
+#ifdef ENABLE_SHIM_DEVEL
+#define FALLBACK_VERBOSE_VAR_NAME L"FALLBACK_DEVEL_VERBOSE"
+#define VERBOSE_VAR_NAME L"SHIM_DEVEL_VERBOSE"
+#define DEBUG_VAR_NAME L"SHIM_DEVEL_DEBUG"
+#else
+#define FALLBACK_VERBOSE_VAR_NAME L"FALLBACK_VERBOSE"
+#define VERBOSE_VAR_NAME L"SHIM_VERBOSE"
+#define DEBUG_VAR_NAME L"SHIM_DEBUG"
+#endif
+
+#define SHIM_RETAIN_PROTOCOL_VAR_NAME L"ShimRetainProtocol"
 
 char *translate_slashes(char *out, const char *str);
 

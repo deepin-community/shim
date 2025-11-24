@@ -1,16 +1,83 @@
-shim (15.4.1-7) UNRELEASED; urgency=medium
+shim (15.8-1) unstable; urgency=medium
 
-  * update
+  [ Steve McIntyre ]
+  * Cope with changes in pesign packaging. Closes: #1057606
+  * New upstream release fixing more bugs. Closes: #1061519, #1064220
+    + CVE-2023-40546 mok: fix LogError() invocation (Closes: #1054210)
+    + CVE-2023-40547 - avoid incorrectly trusting HTTP headers
+    + CVE-2023-40548 Fix integer overflow on SBAT section size on
+      32-bit system
+    + CVE-2023-40549 Authenticode: verify that the signature header is
+      in bounds.
+    + CVE-2023-40550 pe: Fix an out-of-bound read in
+      verify_buffer_sbat()
+    + CVE-2023-40551: pe-relocate: Fix bounds check for MZ binaries
+  * Remove all our previous patches, no longer needed:
+    + Make-sbat_var.S-parse-right-with-buggy-gcc-binutils.patch (now
+      upstream)
+    + Enable-NX.patch (we don't want NX just yet until the whole boot
+      stack is NX-capable)
+    + block-grub-sbat3-debian.patch (not needed now upstream grub SBAT
+      is 4)
+  * Cherry-pick 2 new patches from upstream for grub revocations:
+    + 0001-sbat-Add-grub.peimage-2-to-latest-CVE-2024-2312.patch
+    + 0002-sbat-Also-bump-latest-for-grub-4-and-to-todays-date.patch
+  * NOTE: Stop building for i386
+    + Debian kernels are no longer signed for i386, it's time to stop
+      supporting i386 SB.
+  * Log if the build is nx-compatible or not
+  * Force shim to use the latest revocations by default to block some
+    older grub / peimage issues. This is:
+    "shim,4\ngrub,4\ngrub.peimage,2\n"
+  * Install a copy of the Debian CA certificate into /usr/share/shim.
+    Closes: #1069054
+  * Clean up better after build. Closes: #1046268
 
- -- Debian EFI team <debian-efi@lists.debian.org>  Fri, 27 May 2022 14:04:03 +0800
+  [ Bastien Roucariès ]
+  * Port autopkgtest from ubuntu
+  * Import MR-12: "shim-unsigned:amd64 cannot be installed alongside
+    shim-unsigned:i386", thanks to adrian15 adrian15 (Closes: #936009).
+  * Fix debian/watch and check signature (Closes: #1043485)
 
-shim (15.4.1-7) unstable; urgency=medium
+ -- Steve McIntyre <93sam@debian.org>  Sat, 04 May 2024 23:29:52 +0100
 
-  * 添加UOS，deepin编译支持
-  * 添加UOS，deepin证书
-  * 更新编译依赖gcc-10 -> gcc-11
+shim (15.7-1) unstable; urgency=medium
 
- -- zhouzilong <zhouzilong@uniontech.com>  Thu, 26 May 2022 11:41:58 +0800
+  * New upstream release fixing more bugs
+  * Add further patches from upstream:
+    + Make sbat_var.S parse right with buggy gcc/binutils
+    + Enable NX support at build time, as required by policy for signing
+      new shim binaries.
+  * Switch to using gcc-12. Closes: #1022180
+  * Update to Standards-Version 4.6.2 (no changes needed)
+  * Block Debian grub binaries with sbat < 4 (see #1024617)
+
+ -- Steve McIntyre <93sam@debian.org>  Mon, 30 Jan 2023 18:11:23 +0000
+
+shim (15.6-1) unstable; urgency=medium
+
+  * New upstream release fixing more bugs
+    + Remove all our old patches, all now upstream:
+      - fix-32b-format-strings.patch
+      - fix-test-includes.patch
+
+ -- Steve McIntyre <93sam@debian.org>  Thu, 21 Jul 2022 14:04:01 +0200
+
+shim (15.5-1) UNRELEASED; urgency=medium
+
+  * New upstream release fixing more bugs
+    + Remove all our old patches, all now upstream:
+      - Don-t-call-QueryVariableInfo-on-EFI-1.10-machines.patch
+      - MOK-BootServicesData.patch
+      -	fix-broken-ia32-reloc.patch
+      -	fix-import_one_mok_state.patch
+      - fix_arm64_rela_sections.patch
+      - relax_check_for_import_mok_state.patch
+  * Fix format strings for 32-bit builds
+  * Tweak setup for dh_auto_test so the tests work
+  * Add new build-dep on libefivar-dev for tests
+
+ -- Steve McIntyre <93sam@debian.org>  Wed, 27 Apr 2022 22:50:08 +0100
 
 shim (15.4-7) unstable; urgency=high
 

@@ -10,6 +10,7 @@ typedef struct {
 
 UINTN measuredcount = 0;
 VARIABLE_RECORD *measureddata = NULL;
+static BOOLEAN tpm_defective = FALSE;
 
 static BOOLEAN tpm_present(efi_tpm_protocol_t *tpm)
 {
@@ -17,6 +18,9 @@ static BOOLEAN tpm_present(efi_tpm_protocol_t *tpm)
 	TCG_EFI_BOOT_SERVICE_CAPABILITY caps;
 	UINT32 flags;
 	EFI_PHYSICAL_ADDRESS eventlog, lastevent;
+
+	if (tpm_defective)
+		return FALSE;
 
 	caps.Size = (UINT8)sizeof(caps);
 	efi_status = tpm->status_check(tpm, &caps, &flags,
@@ -104,6 +108,45 @@ static EFI_STATUS tpm_locate_protocol(efi_tpm_protocol_t **tpm,
 	return EFI_NOT_FOUND;
 }
 
+static EFI_STATUS cc_log_event_raw(EFI_PHYSICAL_ADDRESS buf, UINTN size,
+				   UINT8 pcr, const CHAR8 *log, UINTN logsize,
+				   UINT32 type, BOOLEAN is_pe_image)
+{
+	EFI_STATUS efi_status;
+	EFI_CC_EVENT *event;
+	efi_cc_protocol_t *cc;
+	EFI_CC_MR_INDEX mr;
+	uint64_t flags = is_pe_image ? EFI_CC_FLAG_PE_COFF_IMAGE : 0;
+
+	efi_status = LibLocateProtocol(&EFI_CC_MEASUREMENT_PROTOCOL_GUID,
+				       (VOID **)&cc);
+	if (EFI_ERROR(efi_status) || !cc)
+		return EFI_SUCCESS;
+
+	efi_status = cc->map_pcr_to_mr_index(cc, pcr, &mr);
+	if (EFI_ERROR(efi_status))
+		return EFI_NOT_FOUND;
+
+	UINTN event_size = sizeof(*event) - sizeof(event->Event) + logsize;
+
+	event = AllocatePool(event_size);
+	if (!event) {
+		perror(L"Unable to allocate event structure\n");
+		return EFI_OUT_OF_RESOURCES;
+	}
+
+	event->Header.HeaderSize = sizeof(EFI_CC_EVENT_HEADER);
+	event->Header.HeaderVersion = EFI_CC_EVENT_HEADER_VERSION;
+	event->Header.MrIndex = mr;
+	event->Header.EventType = type;
+	event->Size = event_size;
+	CopyMem(event->Event, (VOID *)log, logsize);
+	efi_status = cc->hash_log_extend_event(cc, flags, buf, (UINT64)size,
+					       event);
+	FreePool(event);
+	return efi_status;
+}
+
 static EFI_STATUS tpm_log_event_raw(EFI_PHYSICAL_ADDRESS buf, UINTN size,
 				    UINT8 pcr, const CHAR8 *log, UINTN logsize,
 				    UINT32 type, CHAR8 *hash)
@@ -113,6 +156,15 @@ static EFI_STATUS tpm_log_event_raw(EFI_PHYSICAL_ADDRESS buf, UINTN size,
 	efi_tpm2_protocol_t *tpm2;
 	BOOLEAN old_caps;
 	EFI_TCG2_BOOT_SERVICE_CAPABILITY caps;
+
+	/* CC guest like TDX or SEV will measure the buffer and log the event,
+	   extend the result into a specific CC MR like TCG's PCR. It could
+	   coexists with TCG's TPM 1.2 and TPM 2.
+	*/
+	efi_status = cc_log_event_raw(buf, size, pcr, log, logsize, type,
+				      (hash != NULL));
+	if (EFI_ERROR(efi_status))
+		return efi_status;
 
 	efi_status = tpm_locate_protocol(&tpm, &tpm2, &old_caps, &caps);
 	if (EFI_ERROR(efi_status)) {
@@ -191,6 +243,12 @@ static EFI_STATUS tpm_log_event_raw(EFI_PHYSICAL_ADDRESS buf, UINTN size,
 			efi_status = tpm->log_extend_event(tpm, buf,
 				(UINT64)size, TPM_ALG_SHA, event, &eventnum,
 				&lastevent);
+		}
+		if (efi_status == EFI_UNSUPPORTED) {
+			perror(L"Could not write TPM event: %r. Considering "
+			       "the TPM as defective.\n", efi_status);
+			tpm_defective = TRUE;
+			efi_status = EFI_SUCCESS;
 		}
 		FreePool(event);
 		return efi_status;
@@ -353,3 +411,25 @@ fallback_should_prefer_reset(void)
 		return EFI_NOT_FOUND;
 	return EFI_SUCCESS;
 }
+
+#ifdef SHIM_UNIT_TEST
+static void DESTRUCTOR
+tpm_clean_up_measurements(void)
+{
+	for (UINTN i = 0; i < measuredcount; i++) {
+		VARIABLE_RECORD *vr = &measureddata[i];
+
+		if (vr->VariableName)
+			FreePool(vr->VariableName);
+		if (vr->VendorGuid)
+			FreePool(vr->VendorGuid);
+		if (vr->Data)
+			FreePool(vr->Data);
+	}
+	if (measureddata)
+		FreePool(measureddata);
+
+	measuredcount = 0;
+	measureddata = NULL;
+}
+#endif
