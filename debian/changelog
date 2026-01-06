@@ -1,3 +1,9 @@
+shim (15.8-1deepin1) unstable; urgency=medium
+
+  * add loongarch support
+
+ -- zhouzilong <zhouzilong@uniontech.com>  Tue, 06 Jan 2026 13:57:58 +0800
+
 shim (15.8-1) unstable; urgency=medium
 
   [ Steve McIntyre ]

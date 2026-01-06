@@ -35,6 +35,9 @@ endif
 ifeq ($(DEB_HOST_ARCH),i386)
 export EFI_ARCH := ia32
 endif
+ifeq ($(DEB_HOST_ARCH),loong64)
+export EFI_ARCH := loongarch64
+endif
 
 COMMON_OPTIONS += \
 	RELEASE=$(plain_upstream_version) \
