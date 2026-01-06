@@ -1,0 +1,1264 @@
+From 639a2954e29c1e90e1248619c878a967371c2559 Mon Sep 17 00:00:00 2001
+From: zhouzilong <zhouzilong@uniontech.com>
+Date: Tue, 6 Jan 2026 16:24:50 +0800
+Subject: [PATCH] add loongarch support
+patch form: https://gitee.com/opencloudos-stream/shim/blob/4c14dd028cef50cd73656d1d469a9d8b2a6f4c20/add-support-for-loongarch64-architecture.patch
+
+---
+ Cryptlib/Include/OpenSslSupport.h         |   2 +-
+ Cryptlib/Makefile                         |   3 +
+ Cryptlib/OpenSSL/Makefile                 |   3 +
+ Cryptlib/OpenSSL/crypto/modes/modes_lcl.h |   1 +
+ Cryptlib/OpenSSL/crypto/sha/sha512.c      |   1 +
+ Make.defaults                             |   8 ++
+ elf_loongarch64_efi.lds                   | 100 ++++++++++++++
+ gnu-efi/Make.defaults                     |   2 +-
+ gnu-efi/apps/lfbgrid.c                    |   4 +-
+ gnu-efi/gnuefi/crt0-efi-loongarch64.S     |  60 ++++++++
+ gnu-efi/gnuefi/elf_loongarch64_efi.lds    | 118 ++++++++++++++++
+ gnu-efi/gnuefi/reloc_loongarch64.c        | 104 ++++++++++++++
+ gnu-efi/inc/efi.h                         |   2 +
+ gnu-efi/inc/efiapi.h                      |   8 ++
+ gnu-efi/inc/efilib.h                      |   2 +
+ gnu-efi/inc/efirtlib.h                    |   2 +
+ gnu-efi/inc/elf.h                         |   3 +
+ gnu-efi/inc/loongarch64/efibind.h         | 158 ++++++++++++++++++++++
+ gnu-efi/inc/loongarch64/efilibplat.h      |  24 ++++
+ gnu-efi/inc/loongarch64/efisetjmp_arch.h  |  23 ++++
+ gnu-efi/lib/loongarch64/efi_stub.S        |   4 +
+ gnu-efi/lib/loongarch64/initplat.c        |  26 ++++
+ gnu-efi/lib/loongarch64/math.c            |  63 +++++++++
+ gnu-efi/lib/loongarch64/setjmp.S          |  68 ++++++++++
+ include/asm.h                             |   7 +
+ include/peimage.h                         |   3 +
+ include/system/stdarg.h                   |   4 +-
+ include/test.h                            |   2 +
+ lib/Makefile                              |   3 +
+ pe-relocate.c                             |  44 +++++-
+ shim.h                                    |  16 +++
+ 31 files changed, 861 insertions(+), 7 deletions(-)
+ create mode 100644 elf_loongarch64_efi.lds
+ create mode 100644 gnu-efi/gnuefi/crt0-efi-loongarch64.S
+ create mode 100644 gnu-efi/gnuefi/elf_loongarch64_efi.lds
+ create mode 100644 gnu-efi/gnuefi/reloc_loongarch64.c
+ create mode 100644 gnu-efi/inc/loongarch64/efibind.h
+ create mode 100644 gnu-efi/inc/loongarch64/efilibplat.h
+ create mode 100644 gnu-efi/inc/loongarch64/efisetjmp_arch.h
+ create mode 100644 gnu-efi/lib/loongarch64/efi_stub.S
+ create mode 100644 gnu-efi/lib/loongarch64/initplat.c
+ create mode 100644 gnu-efi/lib/loongarch64/math.c
+ create mode 100644 gnu-efi/lib/loongarch64/setjmp.S
+
+diff --git a/Cryptlib/Include/OpenSslSupport.h b/Cryptlib/Include/OpenSslSupport.h
+index 0c2fb8b..a481641 100644
+--- a/Cryptlib/Include/OpenSslSupport.h
++++ b/Cryptlib/Include/OpenSslSupport.h
+@@ -61,7 +61,7 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
+ 
+ #define CONFIG_HEADER_BN_H
+ 
+-#if defined(MDE_CPU_X64) || defined(MDE_CPU_AARCH64) || defined(MDE_CPU_IA64)
++#if defined(MDE_CPU_X64) || defined(MDE_CPU_AARCH64) || defined(MDE_CPU_IA64) || defined(MDE_CPU_LOONGARCH64)
+ //
+ // With GCC we would normally use SIXTY_FOUR_BIT_LONG, but MSVC needs
+ // SIXTY_FOUR_BIT, because 'long' is 32-bit and only 'long long' is
+diff --git a/Cryptlib/Makefile b/Cryptlib/Makefile
+index 626788c..b75a663 100644
+--- a/Cryptlib/Makefile
++++ b/Cryptlib/Makefile
+@@ -34,6 +34,9 @@ endif
+ ifeq ($(ARCH),aarch64)
+ DEFINES		+= -DMDE_CPU_AARCH64
+ endif
++ifeq ($(ARCH),loongarch64)
++DEFINES		+= -DMDE_CPU_LOONGARCH64
++endif
+ ifeq ($(ARCH),arm)
+ DEFINES		+= -DMDE_CPU_ARM
+ endif
+diff --git a/Cryptlib/OpenSSL/Makefile b/Cryptlib/OpenSSL/Makefile
+index d59c5d7..ee8357f 100644
+--- a/Cryptlib/OpenSSL/Makefile
++++ b/Cryptlib/OpenSSL/Makefile
+@@ -46,6 +46,9 @@ endif
+ ifeq ($(ARCH),aarch64)
+ DEFINES		+= -DMDE_CPU_AARCH64
+ endif
++ifeq ($(ARCH),loongarch64)
++DEFINES		+= -DMDE_CPU_LOONGARCH64
++endif
+ ifeq ($(ARCH),arm)
+ DEFINES		+= -DMDE_CPU_ARM
+ endif
+diff --git a/Cryptlib/OpenSSL/crypto/modes/modes_lcl.h b/Cryptlib/OpenSSL/crypto/modes/modes_lcl.h
+index fe14ec7..67dc37d 100644
+--- a/Cryptlib/OpenSSL/crypto/modes/modes_lcl.h
++++ b/Cryptlib/OpenSSL/crypto/modes/modes_lcl.h
+@@ -30,6 +30,7 @@ typedef unsigned char u8;
+      defined(__x86_64)  || defined(__x86_64__)  || \
+      defined(_M_IX86)   || defined(_M_AMD64)    || defined(_M_X64) || \
+      defined(__aarch64__)                       || \
++     defined(__loongarch_lp64)                  || \
+      defined(__s390__)  || defined(__s390x__)
+ #  undef STRICT_ALIGNMENT
+ # endif
+diff --git a/Cryptlib/OpenSSL/crypto/sha/sha512.c b/Cryptlib/OpenSSL/crypto/sha/sha512.c
+index 3bf66ae..8fda50c 100644
+--- a/Cryptlib/OpenSSL/crypto/sha/sha512.c
++++ b/Cryptlib/OpenSSL/crypto/sha/sha512.c
+@@ -56,6 +56,7 @@ const char SHA512_version[] = "SHA-512" OPENSSL_VERSION_PTEXT;
+     defined(__x86_64) || defined(_M_AMD64) || defined(_M_X64) || \
+     defined(__s390__) || defined(__s390x__) || \
+     defined(__aarch64__) || \
++    defined(__loongarch_lp64) || \
+     defined(SHA512_ASM)
+ #  define SHA512_BLOCK_CAN_MANAGE_UNALIGNED_DATA
+ # endif
+diff --git a/Make.defaults b/Make.defaults
+index e75cd3c..7eaf149 100644
+--- a/Make.defaults
++++ b/Make.defaults
+@@ -96,6 +96,14 @@ ifeq ($(ARCH),arm)
+ 	SUBSYSTEM		:= 0xa
+ 	ARCH_LDFLAGS		+= --defsym=EFI_SUBSYSTEM=$(SUBSYSTEM)
+ endif
++ifeq ($(ARCH),loongarch64)
++	ARCH_CFLAGS		?= -DMDE_CPU_LOONGARCH64 -DPAGE_SIZE=4096 -mstrict-align
++	ARCH_GNUEFI		?= loongarch64
++	ARCH_SUFFIX		?= loongarch64
++	ARCH_SUFFIX_UPPER	?= LOONGARCH64
++	ARCH_LDFLAGS		?=
++	ARCH_CFLAGS		?=
++endif
+ 
+ DEFINES		= -DDEFAULT_LOADER='L"$(DEFAULT_LOADER)"' \
+ 		  -DDEFAULT_LOADER_CHAR='"$(DEFAULT_LOADER)"'
+diff --git a/elf_loongarch64_efi.lds b/elf_loongarch64_efi.lds
+new file mode 100644
+index 0000000..5e51c9f
+--- /dev/null
++++ b/elf_loongarch64_efi.lds
+@@ -0,0 +1,100 @@
++OUTPUT_FORMAT("elf64-loongarch", "elf64-loongarch", "elf64-loongarch")
++OUTPUT_ARCH(loongarch)
++ENTRY(_start)
++SECTIONS
++{
++  . = 0;
++  ImageBase = .;
++  .hash : { *(.hash) }	/* this MUST come first! */
++  . = ALIGN(4096);
++  .eh_frame :
++  {
++    *(.eh_frame)
++  }
++  . = ALIGN(4096);
++  .text :
++  {
++   _text = .;
++   *(.text)
++   *(.text.*)
++   *(.gnu.linkonce.t.*)
++   _etext = .;
++  }
++  . = ALIGN(4096);
++  .reloc :
++  {
++   *(.reloc)
++  }
++  . = ALIGN(4096);
++  .note.gnu.build-id : {
++    *(.note.gnu.build-id)
++  }
++
++  . = ALIGN(4096);
++  .data.ident : {
++    *(.data.ident)
++  }
++  . = ALIGN(4096);
++  .sbatlevel : {
++    *(.sbatlevel)
++  }
++
++  . = ALIGN(4096);
++  .data :
++  {
++   _data = .;
++   *(.rodata*)
++   *(.got.plt)
++   *(.got)
++   *(.data*)
++   *(.sdata)
++   /* the EFI loader doesn't seem to like a .bss section, so we stick
++      it all into .data: */
++   *(.sbss)
++   *(.scommon)
++   *(.dynbss)
++   *(.bss)
++   *(COMMON)
++   *(.rel.local)
++  }
++
++  . = ALIGN(4096);
++  .vendor_cert :
++  {
++   *(.vendor_cert)
++  }
++  . = ALIGN(4096);
++  .dynamic  : { *(.dynamic) }
++  . = ALIGN(4096);
++  .rela :
++  {
++    *(.rela.data*)
++    *(.rela.got*)
++    *(.rela.stab*)
++  }
++  _edata = .;
++  _data_size = . - _data;
++  . = ALIGN(4096);
++  .sbat :
++  {
++    _sbat = .;
++    *(.sbat)
++    *(.sbat.*)
++  }
++  _esbat = .;
++  _sbat_size = . - _sbat;
++
++  . = ALIGN(4096);
++  .dynsym   : { *(.dynsym) }
++  . = ALIGN(4096);
++  .dynstr   : { *(.dynstr) }
++  . = ALIGN(4096);
++  .ignored.reloc :
++  {
++    *(.rela.reloc)
++    *(.eh_frame)
++    *(.note.GNU-stack)
++  }
++  .comment 0 : { *(.comment) }
++  .note.gnu.build-id : { *(.note.gnu.build-id) }
++}
+diff --git a/gnu-efi/Make.defaults b/gnu-efi/Make.defaults
+index 59b6508..89b1bb0 100755
+--- a/gnu-efi/Make.defaults
++++ b/gnu-efi/Make.defaults
+@@ -36,7 +36,7 @@
+ 
+ TOPDIR ?= $(shell if [ "$$PWD" != "" ]; then echo $$PWD; else pwd; fi)
+ 
+-ARCHES = ia32 x86_64 ia64 aarch64 arm mips64el
++ARCHES = ia32 x86_64 ia64 aarch64 arm mips64el loongarch64
+ 
+ #
+ # Variables below overridable from command-line:
+diff --git a/gnu-efi/apps/lfbgrid.c b/gnu-efi/apps/lfbgrid.c
+index ac50f4e..82fe8de 100644
+--- a/gnu-efi/apps/lfbgrid.c
++++ b/gnu-efi/apps/lfbgrid.c
+@@ -51,7 +51,7 @@ draw_boxes(EFI_GRAPHICS_OUTPUT_PROTOCOL *gop)
+ 	UINTN NumPixels;
+ 	UINT32 *PixelBuffer;
+ 	UINT32 CopySize, BufferSize;
+-#if defined(__x86_64__) || defined(__aarch64__)
++#if defined(__x86_64__) || defined(__aarch64__) || defined(__loongarch64)
+ 	UINT64 FrameBufferAddr;
+ #elif defined(__i386__) || defined(__arm__)
+ 	UINT32 FrameBufferAddr;
+@@ -115,7 +115,7 @@ draw_boxes(EFI_GRAPHICS_OUTPUT_PROTOCOL *gop)
+ 			Print(L"No linear framebuffer on this device.\n");
+ 			return;
+ 		}
+-#if defined(__x86_64__) || defined(__aarch64__)
++#if defined(__x86_64__) || defined(__aarch64__) || defined(__loongarch64)
+ 		FrameBufferAddr = (UINT64)gop->Mode->FrameBufferBase;
+ #elif defined(__i386__) || defined(__arm__)
+ 		FrameBufferAddr = (UINT32)(UINT64)gop->Mode->FrameBufferBase;
+diff --git a/gnu-efi/gnuefi/crt0-efi-loongarch64.S b/gnu-efi/gnuefi/crt0-efi-loongarch64.S
+new file mode 100644
+index 0000000..4fd2fd9
+--- /dev/null
++++ b/gnu-efi/gnuefi/crt0-efi-loongarch64.S
+@@ -0,0 +1,60 @@
++/*
++ * crt0-efi-loongarch64.S - PE/COFF header for LOONGARCH64 EFI applications
++ *
++ * Copyright (C) 2021 Loongson Technology Corporation Limited. <zhoumingtao@loongson.cn>
++ * Copyright (C) 2014 Linaro Ltd. <ard.biesheuvel@linaro.org>
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice and this list of conditions, without modification.
++ * 2. The name of the author may not be used to endorse or promote products
++ *    derived from this software without specific prior written permission.
++ *
++ * Alternatively, this software may be distributed under the terms of the
++ * GNU General Public License as published by the Free Software Foundation;
++ * either version 2 of the License, or (at your option) any later version.
++ */
++
++	.text
++	.align		12
++	.globl	_start
++	.type	_start, @function
++_start:
++	addi.d	  $sp, $sp, -24
++	st.d	  $ra, $sp, 0
++	st.d	  $a0, $sp, 8
++	st.d 	  $a1, $sp, 16
++
++	move	  $a2, $a0		// a2: ImageHandle
++	move	  $a3, $a1 		// a3: SystemTable
++	la.local  $a0, ImageBase	// a0: ImageBase
++	la.local  $a1, _DYNAMIC		// a1: DynamicSection
++	bl        _relocate
++	bnez	  $a0, 0f
++
++	ld.d	  $a0, $sp, 8
++	ld.d	  $a1, $sp, 16
++	bl 	      efi_main
++
++0:	ld.d	  $ra, $sp, 0
++	addi.d	  $sp, $sp, 24
++	jr	      $ra
++
++// hand-craft a dummy .reloc section so EFI knows it's a relocatable executable:
++
++ 	.data
++dummy:	.4byte	0
++
++#define IMAGE_REL_ABSOLUTE	0
++ 	.section .reloc, "a"
++label1:
++	.4byte	dummy-label1				// Page RVA
++	.4byte	12					// Block Size (2*4+2*2), must be aligned by 32 Bits
++	.2byte	(IMAGE_REL_ABSOLUTE<<12) +  0		// reloc for dummy
++	.2byte	(IMAGE_REL_ABSOLUTE<<12) +  0		// reloc for dummy
++
++#if defined(__ELF__) && defined(__linux__)
++	.section .note.GNU-stack,"",%progbits
++#endif
+diff --git a/gnu-efi/gnuefi/elf_loongarch64_efi.lds b/gnu-efi/gnuefi/elf_loongarch64_efi.lds
+new file mode 100644
+index 0000000..d1645db
+--- /dev/null
++++ b/gnu-efi/gnuefi/elf_loongarch64_efi.lds
+@@ -0,0 +1,118 @@
++OUTPUT_FORMAT("elf64-loongarch", "elf64-loongarch", "elf64-loongarch")
++OUTPUT_ARCH(loongarch)
++ENTRY(_start)
++SECTIONS
++{
++  . = 0;
++  ImageBase = .;
++  /* .hash and/or .gnu.hash MUST come first! */
++  .hash : { *(.hash) }
++  .gnu.hash : { *(.gnu.hash) }
++  . = ALIGN(4096);
++  .eh_frame : { *(.eh_frame) }
++  .gcc_except_table : { *(.gcc_except_table*) }
++  . = ALIGN(4096);
++  .text : {
++    _text = .;
++    *(.text)
++    *(.text.*)
++    *(.gnu.linkonce.t.*)
++    *(.plt)
++    . = ALIGN(16);
++  }
++  _etext = .;
++  _text_size = _etext - _text;
++  . = ALIGN(4096);
++  .reloc :
++  {
++    KEEP (*(.reloc))
++  }
++  . = ALIGN(65536);
++  .dynamic  : { *(.dynamic) }
++  . = ALIGN(4096);
++  .data :
++  {
++   _data = .;
++   *(.sdata)
++   *(.data)
++   *(.data1)
++   *(.data.*)
++   *(.got.plt)
++   *(.got)
++
++   /*
++    * Note that these aren't the using the GNU "CONSTRUCTOR" output section
++    * command, so they don't start with a size.  Because of p2align and the
++    * end/END definitions, and the fact that they're mergeable, they can also
++    * have NULLs which aren't guaranteed to be at the end.
++    */
++   . = ALIGN(16);
++   __init_array_start = .;
++   *(SORT(.init_array.*))
++   *(.init_array)
++   __init_array_end = .;
++  . = ALIGN(16);
++   __CTOR_LIST__ = .;
++   *(SORT(.ctors.*))
++   *(.ctors)
++   __CTOR_END__ = .;
++  . = ALIGN(16);
++   __DTOR_LIST__ = .;
++   *(SORT(.dtors.*))
++   *(.dtors)
++   __DTOR_END__ = .;
++   . = ALIGN(16);
++   __fini_array_start = .;
++   *(SORT(.fini_array.*))
++   *(.fini_array)
++   __fini_array_end = .;
++
++   /* the EFI loader doesn't seem to like a .bss section, so we stick
++      it all into .data: */
++   . = ALIGN(16);
++   _bss = .;
++   *(.sbss)
++   *(.scommon)
++   *(.dynbss)
++   *(.bss*)
++   *(COMMON)
++   *(.rel.local)
++   . = ALIGN(16);
++
++   _bss_end = .;
++  }
++
++  . = ALIGN(4096);
++  .rela :
++  {
++    *(.rela.text*)
++    *(.rela.data*)
++    *(.rela.got)
++    *(.rela.dyn)
++    *(.rela.stab)
++    *(.rela.init_array*)
++    *(.rela.fini_array*)
++    *(.rela.ctors*)
++    *(.rela.dtors*)
++
++  }
++  . = ALIGN(4096);
++  .rela.plt : { *(.rela.plt) }
++  . = ALIGN(4096);
++  .rodata : { *(.rodata*) }
++  _edata = .;
++  _data_size = _etext - _data;
++
++  . = ALIGN(4096);
++  .dynsym   : { *(.dynsym) }
++  . = ALIGN(4096);
++  .dynstr   : { *(.dynstr) }
++  . = ALIGN(4096);
++  .note.gnu.build-id : { *(.note.gnu.build-id) }
++  .ignored.reloc :
++  {
++    *(.rela.reloc)
++    *(.note.GNU-stack)
++  }
++  .comment 0 : { *(.comment) }
++}
+diff --git a/gnu-efi/gnuefi/reloc_loongarch64.c b/gnu-efi/gnuefi/reloc_loongarch64.c
+new file mode 100644
+index 0000000..7860f9d
+--- /dev/null
++++ b/gnu-efi/gnuefi/reloc_loongarch64.c
+@@ -0,0 +1,104 @@
++/* reloc_loongarch64.c - position independent loongarch64 ELF shared object relocator
++   Copyright (C) 2021 Loongson Technology Corporation Limited. <zhoumingtao@loongson.cn>
++   Copyright (C) 2014 Linaro Ltd. <ard.biesheuvel@linaro.org>
++   Copyright (C) 1999 Hewlett-Packard Co.
++	Contributed by David Mosberger <davidm@hpl.hp.com>.
++
++    All rights reserved.
++
++    Redistribution and use in source and binary forms, with or without
++    modification, are permitted provided that the following conditions
++    are met:
++
++    * Redistributions of source code must retain the above copyright
++      notice, this list of conditions and the following disclaimer.
++    * Redistributions in binary form must reproduce the above
++      copyright notice, this list of conditions and the following
++      disclaimer in the documentation and/or other materials
++      provided with the distribution.
++    * Neither the name of Hewlett-Packard Co. nor the names of its
++      contributors may be used to endorse or promote products derived
++      from this software without specific prior written permission.
++
++    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
++    CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
++    INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++    MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++    DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++    BE LIABLE FOR ANYDIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
++    OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++    PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
++    PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR
++    TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
++    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++    SUCH DAMAGE.
++*/
++
++#include <efi.h>
++#include <efilib.h>
++
++#include <elf.h>
++
++EFI_STATUS _relocate (long ldbase, Elf64_Dyn *dyn,
++                      EFI_HANDLE image EFI_UNUSED,
++                      EFI_SYSTEM_TABLE *systab EFI_UNUSED)
++{
++	long relsz = 0, relent = 0;
++	Elf64_Rela *rel = 0;
++	unsigned long *addr;
++	int i;
++
++	for (i = 0; dyn[i].d_tag != DT_NULL; ++i) {
++		switch (dyn[i].d_tag) {
++			case DT_RELA:
++				rel = (Elf64_Rela*)
++					((unsigned long)dyn[i].d_un.d_ptr
++					 + ldbase);
++				break;
++
++			case DT_RELASZ:
++				relsz = dyn[i].d_un.d_val;
++				break;
++
++			case DT_RELAENT:
++				relent = dyn[i].d_un.d_val;
++				break;
++
++			case DT_PLTGOT:
++				addr = (unsigned long *)
++					((unsigned long)dyn[i].d_un.d_ptr
++					 + ldbase);
++				break;
++
++			default:
++				break;
++		}
++	}
++
++	if (!rel && relent == 0)
++		return EFI_SUCCESS;
++
++	if (!rel || relent == 0)
++		return EFI_LOAD_ERROR;
++
++	while (relsz > 0) {
++		/* apply the relocs */
++		switch (ELF64_R_TYPE (rel->r_info)) {
++			case R_LARCH_NONE:
++				break;
++
++			case R_LARCH_RELATIVE:
++				addr = (unsigned long *)
++					(ldbase + rel->r_offset);
++				*addr += ldbase;
++				break;
++
++			default:
++				break;
++		}
++		rel = (Elf64_Rela*) ((char *) rel + relent);
++		relsz -= relent;
++	}
++	return EFI_SUCCESS;
++}
+diff --git a/gnu-efi/inc/efi.h b/gnu-efi/inc/efi.h
+index bd99451..a553a89 100644
+--- a/gnu-efi/inc/efi.h
++++ b/gnu-efi/inc/efi.h
+@@ -50,6 +50,8 @@ Revision History
+ #include "arm/efibind.h"
+ #elif defined (_M_MIPS64) || defined(__mips64__)
+ #include "mips64el/efibind.h"
++#elif defined (__loongarch64)
++#include "loongarch64/efibind.h"
+ #else
+ #error Usupported architecture
+ #endif
+diff --git a/gnu-efi/inc/efiapi.h b/gnu-efi/inc/efiapi.h
+index 96e9e4a..c280d53 100644
+--- a/gnu-efi/inc/efiapi.h
++++ b/gnu-efi/inc/efiapi.h
+@@ -343,6 +343,14 @@ EFI_STATUS
+ #define EFI_IMAGE_MACHINE_AARCH64   0xAA64
+ #endif
+ 
++#if !defined(EFI_IMAGE_MACHINE_LOONGARCH32)
++#define EFI_IMAGE_MACHINE_LOONGARCH32   0x6232
++#endif
++
++#if !defined(EFI_IMAGE_MACHINE_LOONGARCH64)
++#define EFI_IMAGE_MACHINE_LOONGARCH64   0x6264
++#endif
++
+ // Image Entry prototype
+ 
+ typedef 
+diff --git a/gnu-efi/inc/efilib.h b/gnu-efi/inc/efilib.h
+index af47019..3e8286e 100644
+--- a/gnu-efi/inc/efilib.h
++++ b/gnu-efi/inc/efilib.h
+@@ -33,6 +33,8 @@ Revision History
+ #include "arm/efilibplat.h"
+ #elif defined (_M_MIPS64) || defined(__mips64__)
+ #include "mips64el/efilibplat.h"
++#elif defined (__loongarch64)
++#include "loongarch64/efilibplat.h"
+ #endif
+ #include "efilink.h"
+ #include "efirtlib.h"
+diff --git a/gnu-efi/inc/efirtlib.h b/gnu-efi/inc/efirtlib.h
+index 5071493..d81ee71 100644
+--- a/gnu-efi/inc/efirtlib.h
++++ b/gnu-efi/inc/efirtlib.h
+@@ -32,6 +32,8 @@ Revision History
+ #include "arm/efilibplat.h"
+ #elif defined (_M_MIPS64) || defined(__mips64__)
+ #include "mips64el/efilibplat.h"
++#elif defined (__loongarch64)
++#include "loongarch64/efilibplat.h"
+ #endif
+ 
+ 
+diff --git a/gnu-efi/inc/elf.h b/gnu-efi/inc/elf.h
+index 7682e9f..e3d9256 100644
+--- a/gnu-efi/inc/elf.h
++++ b/gnu-efi/inc/elf.h
+@@ -1328,6 +1328,9 @@ typedef struct {
+ #define ELF64_M_SIZE(info)	ELF32_M_SIZE (info)
+ #define ELF64_M_INFO(sym, size)	ELF32_M_INFO (sym, size)
+ 
++#define R_LARCH_NONE     0
++#define R_LARCH_RELATIVE 3
++
+ /* Motorola 68k specific definitions.  */
+ 
+ /* Values for Elf32_Ehdr.e_flags.  */
+diff --git a/gnu-efi/inc/loongarch64/efibind.h b/gnu-efi/inc/loongarch64/efibind.h
+new file mode 100644
+index 0000000..4642591
+--- /dev/null
++++ b/gnu-efi/inc/loongarch64/efibind.h
+@@ -0,0 +1,158 @@
++/*
++ * Copright (C) 2014 - 2015 Linaro Ltd.
++ * Author: Ard Biesheuvel <ard.biesheuvel@linaro.org>
++ * Copright (C) 2017 Lemote Co.
++ * Author: Heiher <r@hev.cc>
++ * Copright (C) 2021 Loongson Technology Corporation Limited.
++ * Author: zhoumingtao <zhoumingtao@loongson.cn>
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice and this list of conditions, without modification.
++ * 2. The name of the author may not be used to endorse or promote products
++ *    derived from this software without specific prior written permission.
++ *
++ * Alternatively, this software may be distributed under the terms of the
++ * GNU General Public License as published by the Free Software Foundation;
++ * either version 2 of the License, or (at your option) any later version.
++ */
++
++#if !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 199901L ) && !defined(__cplusplus)
++
++// ANSI C 1999/2000 stdint.h integer width declarations
++
++typedef unsigned long       uint64_t;
++typedef long                int64_t;
++typedef unsigned int        uint32_t;
++typedef int                 int32_t;
++typedef unsigned short      uint16_t;
++typedef short               int16_t;
++typedef unsigned char       uint8_t;
++typedef signed char         int8_t;
++typedef uint64_t            uintptr_t;
++typedef int64_t             intptr_t;
++
++#else
++#include <stdint.h>
++#endif
++
++//
++// Basic EFI types of various widths
++//
++
++#include <stddef.h>
++
++typedef wchar_t CHAR16;
++#define WCHAR CHAR16
++
++typedef uint64_t   UINT64;
++typedef int64_t    INT64;
++
++typedef uint32_t   UINT32;
++typedef int32_t    INT32;
++
++typedef uint16_t   UINT16;
++typedef int16_t    INT16;
++typedef uint8_t    UINT8;
++typedef char       CHAR8;
++typedef int8_t     INT8;
++
++#undef VOID
++typedef void       VOID;
++
++typedef int64_t    INTN;
++typedef uint64_t   UINTN;
++
++#define EFIERR(a)           (0x8000000000000000 | a)
++#define EFI_ERROR_MASK      0x8000000000000000
++#define EFIERR_OEM(a)       (0xc000000000000000 | a)
++
++#define BAD_POINTER         0xFBFBFBFBFBFBFBFB
++#define MAX_ADDRESS         0xFFFFFFFFFFFFFFFF
++
++#define BREAKPOINT()        while (TRUE);    // Make it hang on Bios[Dbg]32
++
++//
++// Pointers must be aligned to these address to function
++//
++
++#define MIN_ALIGNMENT_SIZE  8
++
++#define ALIGN_VARIABLE(Value ,Adjustment) \
++            (UINTN)Adjustment = 0; \
++            if((UINTN)Value % MIN_ALIGNMENT_SIZE) \
++                (UINTN)Adjustment = MIN_ALIGNMENT_SIZE - ((UINTN)Value % MIN_ALIGNMENT_SIZE); \
++            Value = (UINTN)Value + (UINTN)Adjustment
++
++
++//
++// Define macros to build data structure signatures from characters.
++//
++
++#define EFI_SIGNATURE_16(A,B)             ((A) | (B<<8))
++#define EFI_SIGNATURE_32(A,B,C,D)         (EFI_SIGNATURE_16(A,B)     | (EFI_SIGNATURE_16(C,D)     << 16))
++#define EFI_SIGNATURE_64(A,B,C,D,E,F,G,H) (EFI_SIGNATURE_32(A,B,C,D) | ((UINT64)(EFI_SIGNATURE_32(E,F,G,H)) << 32))
++
++//
++// EFIAPI - prototype calling convention for EFI function pointers
++// BOOTSERVICE - prototype for implementation of a boot service interface
++// RUNTIMESERVICE - prototype for implementation of a runtime service interface
++// RUNTIMEFUNCTION - prototype for implementation of a runtime function that is not a service
++// RUNTIME_CODE - pragma macro for declaring runtime code
++//
++
++#ifndef EFIAPI          // Forces EFI calling conventions reguardless of compiler options
++#define EFIAPI          // Substitute expresion to force C calling convention
++#endif
++
++#define BOOTSERVICE
++#define RUNTIMESERVICE
++#define RUNTIMEFUNCTION
++
++
++#define RUNTIME_CODE(a)         alloc_text("rtcode", a)
++#define BEGIN_RUNTIME_DATA()    data_seg("rtdata")
++#define END_RUNTIME_DATA()      data_seg("")
++
++#define VOLATILE                volatile
++
++#define MEMORY_FENCE            __sync_synchronize
++
++//
++// When build similiar to FW, then link everything together as
++// one big module.
++//
++
++#define EFI_DRIVER_ENTRY_POINT(InitFunction)    \
++    UINTN                                       \
++    InitializeDriver (                          \
++        VOID    *ImageHandle,                   \
++        VOID    *SystemTable                    \
++        )                                       \
++    {                                           \
++        return InitFunction(ImageHandle,        \
++                SystemTable);                   \
++    }                                           \
++                                                \
++    EFI_STATUS efi_main(                        \
++        EFI_HANDLE image,                       \
++        EFI_SYSTEM_TABLE *systab                \
++        ) __attribute__((weak,                  \
++                alias ("InitializeDriver")));
++
++#define LOAD_INTERNAL_DRIVER(_if, type, name, entry)    \
++        (_if)->LoadInternal(type, name, entry)
++
++
++//
++// Some compilers don't support the forward reference construct:
++//  typedef struct XXXXX
++//
++// The following macro provide a workaround for such cases.
++
++#define INTERFACE_DECL(x) struct x
++
++#define uefi_call_wrapper(func, va_num, ...) func(__VA_ARGS__)
++#define EFI_FUNCTION
+diff --git a/gnu-efi/inc/loongarch64/efilibplat.h b/gnu-efi/inc/loongarch64/efilibplat.h
+new file mode 100644
+index 0000000..eda7c83
+--- /dev/null
++++ b/gnu-efi/inc/loongarch64/efilibplat.h
+@@ -0,0 +1,24 @@
++/*++
++
++Copyright (c) 1998  Intel Corporation
++
++Module Name:
++
++    efilibplat.h
++
++Abstract:
++
++    EFI to compile bindings
++
++
++
++
++Revision History
++
++--*/
++
++VOID
++InitializeLibPlatform (
++    IN EFI_HANDLE           ImageHandle,
++    IN EFI_SYSTEM_TABLE     *SystemTable
++    );
+diff --git a/gnu-efi/inc/loongarch64/efisetjmp_arch.h b/gnu-efi/inc/loongarch64/efisetjmp_arch.h
+new file mode 100644
+index 0000000..18aefaf
+--- /dev/null
++++ b/gnu-efi/inc/loongarch64/efisetjmp_arch.h
+@@ -0,0 +1,23 @@
++#ifndef GNU_EFI_LOONGARCH64_SETJMP_H
++#define GNU_EFI_LOONGARCH64_SETJMP_H
++
++#define JMPBUF_ALIGN 8
++
++typedef struct {
++	/* GP regs */
++	UINT64	RA;
++	UINT64	SP;
++	UINT64	FP;
++
++	UINT64	S0;
++	UINT64	S1;
++	UINT64	S2;
++	UINT64	S3;
++	UINT64	S4;
++	UINT64	S5;
++	UINT64	S6;
++	UINT64	S7;
++	UINT64	S8;
++} ALIGN(JMPBUF_ALIGN) jmp_buf[1];
++
++#endif /* GNU_EFI_LOONGARCH64_SETJMP_H */
+diff --git a/gnu-efi/lib/loongarch64/efi_stub.S b/gnu-efi/lib/loongarch64/efi_stub.S
+new file mode 100644
+index 0000000..b3fba1d
+--- /dev/null
++++ b/gnu-efi/lib/loongarch64/efi_stub.S
+@@ -0,0 +1,4 @@
++/* This stub is a stub to make the build happy */
++#if defined(__ELF__) && defined(__linux__)
++       .section .note.GNU-stack,"",%progbits
++#endif
+diff --git a/gnu-efi/lib/loongarch64/initplat.c b/gnu-efi/lib/loongarch64/initplat.c
+new file mode 100644
+index 0000000..6c5e1fa
+--- /dev/null
++++ b/gnu-efi/lib/loongarch64/initplat.c
+@@ -0,0 +1,26 @@
++/*
++ * Copright (C) 2014 Linaro Ltd.
++ * Author: Ard Biesheuvel <ard.biesheuvel@linaro.org>
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice and this list of conditions, without modification.
++ * 2. The name of the author may not be used to endorse or promote products
++ *    derived from this software without specific prior written permission.
++ *
++ * Alternatively, this software may be distributed under the terms of the
++ * GNU General Public License as published by the Free Software Foundation;
++ * either version 2 of the License, or (at your option) any later version.
++ */
++
++#include "lib.h"
++
++VOID
++InitializeLibPlatform (
++    IN EFI_HANDLE           ImageHandle EFI_UNUSED,
++    IN EFI_SYSTEM_TABLE     *SystemTable EFI_UNUSED
++    )
++{
++}
+diff --git a/gnu-efi/lib/loongarch64/math.c b/gnu-efi/lib/loongarch64/math.c
+new file mode 100644
+index 0000000..8c16444
+--- /dev/null
++++ b/gnu-efi/lib/loongarch64/math.c
+@@ -0,0 +1,63 @@
++/*
++ * Copright (C) 2014 Linaro Ltd.
++ * Author: Ard Biesheuvel <ard.biesheuvel@linaro.org>
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice and this list of conditions, without modification.
++ * 2. The name of the author may not be used to endorse or promote products
++ *    derived from this software without specific prior written permission.
++ *
++ * Alternatively, this software may be distributed under the terms of the
++ * GNU General Public License as published by the Free Software Foundation;
++ * either version 2 of the License, or (at your option) any later version.
++ */
++
++#include "lib.h"
++
++UINT64
++LShiftU64 (
++    IN UINT64   Operand,
++    IN UINTN    Count
++    )
++// Left shift 64bit by 32bit and get a 64bit result
++{
++    return Operand << Count;
++}
++
++UINT64
++RShiftU64 (
++    IN UINT64   Operand,
++    IN UINTN    Count
++    )
++// Right shift 64bit by 32bit and get a 64bit result
++{
++    return Operand >> Count;
++}
++
++
++UINT64
++MultU64x32 (
++    IN UINT64   Multiplicand,
++    IN UINTN    Multiplier
++    )
++// Multiple 64bit by 32bit and get a 64bit result
++{
++    return Multiplicand * Multiplier;
++}
++
++UINT64
++DivU64x32 (
++    IN UINT64   Dividend,
++    IN UINTN    Divisor,
++    OUT UINTN   *Remainder OPTIONAL
++    )
++// divide 64bit by 32bit and get a 64bit result
++// N.B. only works for 31bit divisors!!
++{
++    if (Remainder)
++	*Remainder = Dividend % Divisor;
++    return Dividend / Divisor;
++}
+diff --git a/gnu-efi/lib/loongarch64/setjmp.S b/gnu-efi/lib/loongarch64/setjmp.S
+new file mode 100644
+index 0000000..6821af3
+--- /dev/null
++++ b/gnu-efi/lib/loongarch64/setjmp.S
+@@ -0,0 +1,68 @@
++/*
++ * Copyright (c) 2006 - 2008, Intel Corporation. All rights reserved.
++ * Copyright (c) 2021 Loongson Technology Corporation Limited.All rights
++ * reserved.
++ * Author: zhoumingtao <zhoumingtao@loongson.cn>
++ *
++ * This program and the accompanying materials are licensed and made
++ * available
++ * under the terms and conditions of the BSD License which accompanies
++ * this
++ * distribution.  The full text of the license may be found at
++ * http://opensource.org/licenses/bsd-license.php.
++ *
++ * THE PROGRAM IS DISTRIBUTED UNDER THE BSD LICENSE ON AN "AS IS"
++ * BASIS,
++ * WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR
++ * IMPLIED.
++ */
++
++	.text
++	.p2align 3
++
++/*
++   int setjmp(jmp_buf env);
++*/
++	.globl	setjmp
++	.type	setjmp, @function
++setjmp:
++	st.d $ra, $a0, 0x0
++	st.d $sp, $a0, 0x8
++	st.d $fp, $a0, 0x10
++	st.d $s0, $a0, 0x18
++	st.d $s1, $a0, 0x20
++	st.d $s2, $a0, 0x28
++	st.d $s3, $a0, 0x30
++	st.d $s4, $a0, 0x38
++	st.d $s5, $a0, 0x40
++	st.d $s6, $a0, 0x48
++	st.d $s7, $a0, 0x50
++	st.d $s8, $a0, 0x58
++
++	move $a0, $zero
++	jr   $ra
++
++/*
++   void longjmp(jmp_buf env, int val);
++*/
++	.globl	longjmp
++	.type	longjmp, @function
++longjmp:
++	ld.d $ra, $a0, 0x0
++	ld.d $sp, $a0, 0x8
++	ld.d $fp, $a0, 0x10
++	ld.d $s0, $a0, 0x18
++	ld.d $s1, $a0, 0x20
++	ld.d $s2, $a0, 0x28
++	ld.d $s3, $a0, 0x30
++	ld.d $s4, $a0, 0x38
++	ld.d $s5, $a0, 0x40
++	ld.d $s6, $a0, 0x48
++	ld.d $s7, $a0, 0x50
++	ld.d $s8, $a0, 0x58
++
++	addi.d $a0, $zero, 1	# a0 = 1
++	beqz $a1, .L0		# if (a1 == 0); goto L0
++	move $a0, $a1		# a0 = a1
++.L0:
++	jr   $ra
+diff --git a/include/asm.h b/include/asm.h
+index f5118b2..4a31558 100644
+--- a/include/asm.h
++++ b/include/asm.h
+@@ -19,6 +19,8 @@ static inline uint64_t read_counter(void)
+         __asm__ __volatile__ ("mrs %0, pmccntr_el0" : "=r" (val));
+ #elif defined(__arm__)
+         __asm__ __volatile__ ("mrc p15, 0, %0, c9, c13, 0" : "=r" (val));
++#elif defined(__loongarch_lp64)
++        __asm__ __volatile__ ( "rdtime.d %0, $zero" : "=r" (val));
+ #else
+ #error unsupported arch
+ #endif
+@@ -35,6 +37,11 @@ static inline void wait_for_debug(void)
+ {
+ 		__asm__ __volatile__("wfi");
+ }
++#elif defined(__loongarch_lp64)
++static inline void wait_for_debug(void)
++{
++		__asm__ __volatile__("idle 0");
++}
+ #else
+ static inline void wait_for_debug(void)
+ {
+diff --git a/include/peimage.h b/include/peimage.h
+index 6eef105..cdd862c 100644
+--- a/include/peimage.h
++++ b/include/peimage.h
+@@ -50,6 +50,7 @@
+ #define IMAGE_FILE_MACHINE_X64             0x8664
+ #define IMAGE_FILE_MACHINE_ARMTHUMB_MIXED  0x01c2
+ #define IMAGE_FILE_MACHINE_ARM64	   0xaa64
++#define IMAGE_FILE_MACHINE_LOONGARCH64	   0x6264
+ 
+ //
+ // EXE file formats
+@@ -545,6 +546,8 @@ typedef struct {
+ #define EFI_IMAGE_REL_BASED_MIPS_JMPADDR    5
+ #define EFI_IMAGE_REL_BASED_ARM_MOV32A      5
+ #define EFI_IMAGE_REL_BASED_ARM_MOV32T      7
++#define EFI_IMAGE_REL_BASED_LOONGARCH32_MARK_LA  8
++#define EFI_IMAGE_REL_BASED_LOONGARCH64_MARK_LA  8
+ #define EFI_IMAGE_REL_BASED_IA64_IMM64      9
+ #define EFI_IMAGE_REL_BASED_MIPS_JMPADDR16  9
+ #define EFI_IMAGE_REL_BASED_DIR64           10
+diff --git a/include/system/stdarg.h b/include/system/stdarg.h
+index 68c171b..cf699d6 100644
+--- a/include/system/stdarg.h
++++ b/include/system/stdarg.h
+@@ -24,7 +24,8 @@ typedef __builtin_va_list __builtin_sysv_va_list;
+ #endif
+ 
+ #if defined(__aarch64__) || defined(__arm__) || defined(__i386__) || \
+-	defined(__i486__) || defined(__i686__) || defined(__COVERITY__)
++	defined(__i486__) || defined(__i686__) || defined(__COVERITY__) || \
++	defined(__loongarch_lp64)
+ 
+ typedef __builtin_va_list ms_va_list;
+ typedef __builtin_va_list __builtin_ms_va_list;
+@@ -42,6 +43,7 @@ typedef __builtin_va_list sysv_va_list;
+  * OpenSSL's X509ConstructCertificateStack needs this.
+  */
+ typedef __builtin_va_list VA_LIST;
++typedef __builtin_va_list va_list;
+ #define VA_COPY(dest, start)  __builtin_va_copy(dest, start)
+ #define VA_START(marker, arg) __builtin_va_start(marker, arg)
+ #define VA_END(marker)        __builtin_va_end(marker)
+diff --git a/include/test.h b/include/test.h
+index 5261dbd..df72584 100644
+--- a/include/test.h
++++ b/include/test.h
+@@ -25,6 +25,8 @@
+ #include <ia32/efibind.h>
+ #elif defined(__x86_64__)
+ #include <x86_64/efibind.h>
++#elif defined(__loongarch_lp64)
++#include <loongarch64/efibind.h>
+ #else
+ #error what arch is this
+ #endif
+diff --git a/lib/Makefile b/lib/Makefile
+index f81c5c9..b5f2e04 100644
+--- a/lib/Makefile
++++ b/lib/Makefile
+@@ -30,6 +30,9 @@ endif
+ ifeq ($(ARCH),arm)
+ DEFINES		+= -DMDE_CPU_ARM
+ endif
++ifeq ($(ARCH),loongarch64)
++DEFINES		+= -DMDE_CPU_LOONGARCH64
++endif
+ 
+ LDFLAGS		= -nostdlib -znocombreloc
+ 
+diff --git a/pe-relocate.c b/pe-relocate.c
+index bde7172..7778fc2 100644
+--- a/pe-relocate.c
++++ b/pe-relocate.c
+@@ -45,6 +45,7 @@ relocate_coff (PE_COFF_LOADER_IMAGE_CONTEXT *context,
+ 	int size = context->ImageSize;
+ 	void *ImageEnd = (char *)orig + size;
+ 	int n = 0;
++	UINT64 hi12, hi20, low12, low20, value;
+ 
+ 	/* Alright, so here's how this works:
+ 	 *
+@@ -142,6 +143,43 @@ relocate_coff (PE_COFF_LOADER_IMAGE_CONTEXT *context,
+ 				*Fixup64 = *Fixup64 + (UINT64) Adjust;
+ 				break;
+ 
++			case EFI_IMAGE_REL_BASED_LOONGARCH64_MARK_LA:
++				/*
++				 * The 64-bit addresses of the following 4 instructions
++				 * need to be relocated and fixed together.
++
++				 * lu12i.w: [0000 000]    [imm20]      [0 0000]
++				 * ori    : [0000 0000 00][imm12][00 0000 0000]
++				 * lu32i.d: [0000 000]    [imm20]      [0 0000]
++				 * lu52i.d: [0000 0000 00][imm12][00 0000 0000]
++				 */
++
++#define IMM20_MASK 0x1ffffe0    /* 20-bit immediate mask in lu12i.w and lu32i.d */
++#define IMM12_MASK 0x3ffc00     /* 12-bit immediate mask in ori and lu52i.d */
++
++				low20 = (*(UINT32*)Fixup & IMM20_MASK ) >> 5;        /* lu12i.w 20-bits from bit5 */
++				low12 = (*((UINT32*)Fixup + 1) & IMM12_MASK ) >> 10; /* ori  12-bits from bit10 */
++				hi20 = (*((UINT32*)Fixup + 2) & IMM20_MASK) >> 5;    /* lu32i.d 20-bits from bit5 */
++				hi12 = (*((UINT32*)Fixup + 3) & IMM12_MASK) >> 10;   /* lu52i.d 12-bits from bit10 */
++
++				value = (hi12 << 52) | (hi20 << 32) | (low20 << 12) | low12;
++				value += Adjust;
++
++				/* lu12i.w */
++				*(UINT32*)Fixup = (*(UINT32*)Fixup & ~IMM20_MASK) | ((value >> 12) & 0xfffff) << 5;
++
++				/* ori */
++				Fixup += sizeof(UINT32);
++				*(UINT32*)Fixup = (*(UINT32*)Fixup & ~IMM12_MASK) | (value & 0xfff) << 10;
++
++				/* lu32i.d */
++				Fixup += sizeof(UINT32);
++				*(UINT32*)Fixup = (*(UINT32*)Fixup & ~IMM20_MASK) | ((value >> 32) & 0xfffff) << 5;
++
++				/* lu52i.d */
++				Fixup += sizeof(UINT32);
++				*(UINT32*)Fixup = (*(UINT32*)Fixup & ~IMM12_MASK) | ((value >> 52) & 0xfff) << 10;
++				break;
+ 			default:
+ 				perror(L"Reloc %d Unknown relocation\n", n);
+ 				return EFI_UNSUPPORTED;
+@@ -272,7 +310,7 @@ get_section_vma_by_name (char *name, size_t namesz,
+ static int
+ allow_64_bit(void)
+ {
+-#if defined(__x86_64__) || defined(__aarch64__)
++#if defined(__x86_64__) || defined(__aarch64__) || defined(__loongarch_lp64)
+ 	return 1;
+ #elif defined(__i386__) || defined(__i686__)
+ 	/* Right now blindly assuming the kernel will correctly detect this
+@@ -298,7 +336,7 @@ allow_32_bit(void)
+ #endif
+ #elif defined(__i386__) || defined(__i686__)
+ 	return 1;
+-#elif defined(__aarch64__)
++#elif defined(__aarch64__) || defined(__loongarch_lp64)
+ 	return 0;
+ #else /* assuming everything else is 32-bit... */
+ 	return 1;
+@@ -326,6 +364,8 @@ static const UINT16 machine_type =
+ 	IMAGE_FILE_MACHINE_I386;
+ #elif defined(__ia64__)
+ 	IMAGE_FILE_MACHINE_IA64;
++#elif defined(__loongarch_lp64)
++	IMAGE_FILE_MACHINE_LOONGARCH64;
+ #else
+ #error this architecture is not supported by shim
+ #endif
+diff --git a/shim.h b/shim.h
+index 5791a03..649e1bd 100644
+--- a/shim.h
++++ b/shim.h
+@@ -128,6 +128,22 @@
+ #endif
+ #endif
+ 
++#if defined(__loongarch_lp64)
++#ifndef DEFAULT_LOADER
++#define DEFAULT_LOADER L"\\grubloongarch64.efi"
++#endif
++#ifndef DEFAULT_LOADER_CHAR
++#define DEFAULT_LOADER_CHAR "\\grubloongarch64.efi"
++#endif
++#ifndef EFI_ARCH
++#define EFI_ARCH L"loongarch64"
++#endif
++#ifndef DEBUGDIR
++#define DEBUGDIR L"/usr/lib/debug/usr/share/shim/loongarch64/"
++#endif
++#endif
++
++
+ #ifndef DEBUGSRC
+ #define DEBUGSRC L"/usr/src/debug/shim-" VERSIONSTR "." EFI_ARCH
+ #endif
+-- 
+2.20.1
+
