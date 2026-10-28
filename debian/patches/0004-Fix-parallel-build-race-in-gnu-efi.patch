@@ -1,0 +1,21 @@
+From: Tianyu Chen <sweetyfish@deepin.org>
+Date: Wed, 28 Oct 2026 18:46:18 +0800
+Subject: Fix parallel build race in gnu-efi
+
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 8283d56..bbf707b 100644
+--- a/Makefile
++++ b/Makefile
+@@ -154,7 +154,7 @@ $(MMSONAME): $(MOK_OBJS) $(LIBS)
+ 	$(LD) -o $@ $(LDFLAGS) $^ $(EFI_LIBS) lib/lib.a
+ 
+ gnu-efi/$(ARCH_GNUEFI)/gnuefi/libgnuefi.a gnu-efi/$(ARCH_GNUEFI)/lib/libefi.a: CFLAGS+=-DGNU_EFI_USE_EXTERNAL_STDARG
+-gnu-efi/$(ARCH_GNUEFI)/gnuefi/libgnuefi.a gnu-efi/$(ARCH_GNUEFI)/lib/libefi.a:
++gnu-efi/$(ARCH_GNUEFI)/gnuefi/libgnuefi.a gnu-efi/$(ARCH_GNUEFI)/lib/libefi.a &:
+ 	mkdir -p gnu-efi/lib gnu-efi/gnuefi
+ 	$(MAKE) -C gnu-efi \
+ 		COMPILER="$(COMPILER)" \
